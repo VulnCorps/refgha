@@ -3,8 +3,8 @@
 ## v1 Requirements
 
 ### Data Pipeline
-- [ ] **PIPE-01**: User can trigger workflow with a single CVE ID via workflow_dispatch
-- [ ] **PIPE-02**: Action fetches CVE JSON from CVEProject/cvelistV5 GitHub raw content (`https://raw.githubusercontent.com/CVEProject/cvelistV5/refs/heads/main/cves/{year}/{numXXX}/CVE-{id}.json`)
+- [x] **PIPE-01**: User can trigger workflow with a single CVE ID via workflow_dispatch
+- [x] **PIPE-02**: Action fetches CVE JSON from CVEProject/cvelistV5 GitHub raw content (`https://raw.githubusercontent.com/CVEProject/cvelistV5/refs/heads/main/cves/{year}/{numXXX}/CVE-{id}.json`)
 - [ ] **PIPE-03**: Action extracts all reference URLs from the API JSON response
 - [ ] **PIPE-04**: Action handles CVEs with zero references gracefully (no-op, clear summary)
 
@@ -47,8 +47,8 @@
 
 | REQ ID | Phase | Status |
 |--------|-------|--------|
-| PIPE-01 | Phase 1 | Pending |
-| PIPE-02 | Phase 1 | Pending |
+| PIPE-01 | Phase 1 | Complete |
+| PIPE-02 | Phase 1 | Complete |
 | PIPE-03 | Phase 1 | Pending |
 | PIPE-04 | Phase 1 | Pending |
 | ARCH-01 | Phase 2 | Pending |
