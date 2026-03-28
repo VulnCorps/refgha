@@ -91,3 +91,70 @@ jobs:
             echo ""
             echo "Matrix prepared. Archiving will begin when downstream jobs are wired."
           } >> "$GITHUB_STEP_SUMMARY"
+
+  archive:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - name: Prepare output directory
+        run: |
+          mkdir -p "$GITHUB_WORKSPACE/output"
+          chmod 777 "$GITHUB_WORKSPACE/output"
+
+      - name: Archive URL with ArchiveBox
+        run: |
+          docker run --rm \
+            -v "$GITHUB_WORKSPACE/output:/data" \
+            -e SAVE_TITLE=False \
+            -e SAVE_FAVICON=False \
+            -e SAVE_WGET=True \
+            -e SAVE_WARC=True \
+            -e SAVE_PDF=True \
+            -e SAVE_SCREENSHOT=True \
+            -e SAVE_DOM=False \
+            -e SAVE_SINGLEFILE=False \
+            -e SAVE_READABILITY=False \
+            -e SAVE_GIT=False \
+            -e SAVE_YTDLP=False \
+            -e SAVE_ARCHIVE_DOT_ORG=False \
+            archivebox/archivebox \
+            add --depth=0 "https://nvd.nist.gov/vuln/detail/CVE-2021-44228"
+
+      - name: Locate snapshot and compress WARC
+        run: |
+          set -euo pipefail
+          SNAPSHOT_DIR=$(find "$GITHUB_WORKSPACE/output/archive" \
+            -mindepth 1 -maxdepth 1 -type d | sort | tail -1)
+
+          if [ -z "$SNAPSHOT_DIR" ]; then
+            echo "::error::No snapshot directory found after ArchiveBox run" >&2
+            exit 1
+          fi
+
+          echo "Snapshot dir: $SNAPSHOT_DIR"
+          ls -la "$SNAPSHOT_DIR" >&2
+
+          # Compress WARC directory to tgz (ARCH-02)
+          if [ -d "${SNAPSHOT_DIR}/warc" ]; then
+            tar -czf "${SNAPSHOT_DIR}/warc.tgz" -C "${SNAPSHOT_DIR}" warc/
+            echo "WARC compressed: ${SNAPSHOT_DIR}/warc.tgz"
+          else
+            echo "::warning::No warc/ directory — SAVE_WGET/SAVE_WARC may not have produced WARC output"
+          fi
+
+          # Verify all three outputs exist
+          test -f "${SNAPSHOT_DIR}/pdf.pdf"        || { echo "::error::pdf.pdf not found" >&2; exit 1; }
+          test -f "${SNAPSHOT_DIR}/screenshot.png" || { echo "::error::screenshot.png not found" >&2; exit 1; }
+          test -f "${SNAPSHOT_DIR}/warc.tgz"       || { echo "::error::warc.tgz not found" >&2; exit 1; }
+
+          echo "SNAPSHOT_DIR=${SNAPSHOT_DIR}" >> "$GITHUB_ENV"
+
+      - name: Upload archive artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ref-test
+          path: |
+            ${{ env.SNAPSHOT_DIR }}/pdf.pdf
+            ${{ env.SNAPSHOT_DIR }}/screenshot.png
+            ${{ env.SNAPSHOT_DIR }}/warc.tgz
+          if-no-files-found: error
