@@ -165,9 +165,10 @@ jobs:
           fi
 
           # Verify all three outputs exist
-          test -f "${SNAPSHOT_DIR}/pdf.pdf"        || { echo "::error::pdf.pdf not found" >&2; exit 1; }
-          test -f "${SNAPSHOT_DIR}/screenshot.png" || { echo "::error::screenshot.png not found" >&2; exit 1; }
-          test -f "${SNAPSHOT_DIR}/warc.tgz"       || { echo "::error::warc.tgz not found" >&2; exit 1; }
+          echo "Snapshot contents:" && ls -la "$SNAPSHOT_DIR" >&2
+          test -f "${SNAPSHOT_DIR}/output.pdf"      || { echo "::error::output.pdf not found" >&2; exit 1; }
+          test -f "${SNAPSHOT_DIR}/screenshot.png"  || { echo "::error::screenshot.png not found" >&2; exit 1; }
+          test -f "${SNAPSHOT_DIR}/warc.tgz"        || { echo "::error::warc.tgz not found" >&2; exit 1; }
 
           echo "SNAPSHOT_DIR=${SNAPSHOT_DIR}" >> "$GITHUB_ENV"
 
@@ -176,7 +177,7 @@ jobs:
         with:
           name: ref-${{ matrix.ref.index }}
           path: |
-            ${{ env.SNAPSHOT_DIR }}/pdf.pdf
+            ${{ env.SNAPSHOT_DIR }}/output.pdf
             ${{ env.SNAPSHOT_DIR }}/screenshot.png
             ${{ env.SNAPSHOT_DIR }}/warc.tgz
           if-no-files-found: error
