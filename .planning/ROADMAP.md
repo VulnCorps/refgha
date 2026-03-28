@@ -60,7 +60,11 @@ Plans:
   3. The collect job produces a single per-CVE artifact bundle even when some archive jobs have failed
   4. The workflow summary shows a count of successful and failed archive jobs per URL
   5. An end-to-end test with a known CVE ID passes, confirming the full pipeline works
-**Plans**: TBD
+**Plans**: 2 plans
+
+Plans:
+- [ ] 03-01-PLAN.md — Matrix fan-out wiring and collect job: wire archive to prepare matrix, add collect job with bundle and summary
+- [ ] 03-02-PLAN.md — End-to-end verification: YAML validation, ACT smoke test, human checkpoint with CVE-2021-44228
 
 ### Phase 4: Batch Mode
 **Goal**: The workflow can accept a list of CVE IDs and archive references for all of them in a single run
@@ -81,5 +85,5 @@ Phases execute in numeric order: 1 → 2 → 3 → 4
 |-------|----------------|--------|-----------|
 | 1. Data Pipeline | 0/3 | Planned | - |
 | 2. ArchiveBox Integration | 0/2 | Planned | - |
-| 3. Full Single-CVE Workflow | 0/? | Not started | - |
+| 3. Full Single-CVE Workflow | 0/2 | Planned | - |
 | 4. Batch Mode | 0/? | Not started | - |
