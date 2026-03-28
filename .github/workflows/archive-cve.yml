@@ -1,0 +1,60 @@
+name: Archive CVE References
+
+on:
+  workflow_dispatch:
+    inputs:
+      cve_id:
+        description: 'CVE ID to archive (e.g. CVE-2021-44228)'
+        required: true
+        type: string
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.extract.outputs.matrix }}
+      has_refs: ${{ steps.extract.outputs.has_refs }}
+      ref_count: ${{ steps.extract.outputs.ref_count }}
+    steps:
+      - name: Fetch and extract CVE references
+        id: extract
+        run: |
+          set -euo pipefail
+
+          CVE_ID="${{ inputs.cve_id }}"
+
+          # Validate CVE ID format (must be CVE-YYYY-NNNNN, uppercase, 4+ digit suffix)
+          if [[ ! "$CVE_ID" =~ ^CVE-[0-9]{4}-[0-9]{4,}$ ]]; then
+            echo "::error::Invalid CVE ID format: '$CVE_ID'. Expected format: CVE-YYYY-NNNNN (e.g. CVE-2021-44228)" >&2
+            exit 1
+          fi
+
+          # Parse CVE ID components
+          YEAR=$(echo "$CVE_ID" | cut -d'-' -f2)
+          NUM=$(echo "$CVE_ID" | cut -d'-' -f3)
+
+          # Compute 1000-block path segment: e.g. 29002 → 29xxx, 44228 → 44xxx, 0001 → 0xxx
+          # Strip leading zeros from NUM for arithmetic, then integer-divide by 1000
+          NUM_INT=$(echo "$NUM" | sed 's/^0*//' | grep -E '^[0-9]+$' || echo "0")
+          BLOCK=$(( NUM_INT / 1000 ))
+          NUM_XXX="${BLOCK}xxx"
+
+          # Construct GitHub raw content URL
+          CVE_URL="https://raw.githubusercontent.com/CVEProject/cvelistV5/refs/heads/main/cves/${YEAR}/${NUM_XXX}/CVE-${YEAR}-${NUM}.json"
+          echo "Fetching: $CVE_URL" >&2
+
+          # Fetch CVE JSON from GitHub raw content (no auth required)
+          # --fail-with-body: exit non-zero on HTTP 4xx/5xx, include body in stderr
+          RESPONSE=$(curl --fail-with-body --silent --show-error "$CVE_URL")
+
+          # --- Extraction, empty guard, and matrix output will be added in plan 02 ---
+          # Placeholder: emit empty outputs so the job compiles
+          echo "has_refs=false" >> "$GITHUB_OUTPUT"
+          echo "matrix=[]" >> "$GITHUB_OUTPUT"
+          echo "ref_count=0" >> "$GITHUB_OUTPUT"
+
+          {
+            echo "### ${CVE_ID}: Fetch complete (extraction pending)"
+            echo ""
+            echo "Data fetched from: \`${CVE_URL}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
