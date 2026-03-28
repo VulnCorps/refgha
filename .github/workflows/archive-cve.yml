@@ -47,14 +47,47 @@ jobs:
           # --fail-with-body: exit non-zero on HTTP 4xx/5xx, include body in stderr
           RESPONSE=$(curl --fail-with-body --silent --show-error "$CVE_URL")
 
-          # --- Extraction, empty guard, and matrix output will be added in plan 02 ---
-          # Placeholder: emit empty outputs so the job compiles
-          echo "has_refs=false" >> "$GITHUB_OUTPUT"
-          echo "matrix=[]" >> "$GITHUB_OUTPUT"
-          echo "ref_count=0" >> "$GITHUB_OUTPUT"
+          # Extract reference URLs (null-safe — handles reserved/rejected CVEs where
+          # .containers.cna or .references may be absent)
+          URLS=$(echo "$RESPONSE" | jq -r '
+            (.containers.cna.references // [])
+            | .[].url
+          ' 2>/dev/null || true)
+
+          # Count non-empty lines
+          REF_COUNT=$(printf '%s' "$URLS" | grep -c . 2>/dev/null || echo "0")
+
+          # Empty reference guard: GHA treats fromJSON([]) as a workflow-level error.
+          # Must check count here and skip matrix output if zero — cannot be caught downstream.
+          if [ "$REF_COUNT" -eq 0 ]; then
+            echo "has_refs=false" >> "$GITHUB_OUTPUT"
+            echo "matrix=[]" >> "$GITHUB_OUTPUT"
+            echo "ref_count=0" >> "$GITHUB_OUTPUT"
+            {
+              echo "### ${CVE_ID}: No References Found"
+              echo ""
+              echo "This CVE has no reference URLs. Nothing to archive."
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          # Build fromJSON-compatible matrix: array of {index, url} objects.
+          # Index is embedded here (not derived from URL) to avoid artifact name collisions
+          # and because strategy.job-index is not reliably accessible inside matrix steps.
+          MATRIX=$(printf '%s' "$URLS" | jq -R -s '
+            split("\n")
+            | map(select(length > 0))
+            | to_entries
+            | map({"index": .key, "url": .value})
+            | tojson
+          ')
+
+          echo "has_refs=true" >> "$GITHUB_OUTPUT"
+          echo "ref_count=${REF_COUNT}" >> "$GITHUB_OUTPUT"
+          echo "matrix=${MATRIX}" >> "$GITHUB_OUTPUT"
 
           {
-            echo "### ${CVE_ID}: Fetch complete (extraction pending)"
+            echo "### ${CVE_ID}: ${REF_COUNT} reference(s) found"
             echo ""
-            echo "Data fetched from: \`${CVE_URL}\`"
+            echo "Matrix prepared. Archiving will begin when downstream jobs are wired."
           } >> "$GITHUB_STEP_SUMMARY"
