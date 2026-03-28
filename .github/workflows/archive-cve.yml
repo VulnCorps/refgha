@@ -141,6 +141,10 @@ jobs:
       - name: Locate snapshot and compress WARC
         run: |
           set -euo pipefail
+
+          # Fix permissions — Docker container writes as root
+          sudo chown -R $(id -u):$(id -g) "$GITHUB_WORKSPACE/output"
+
           SNAPSHOT_DIR=$(find "$GITHUB_WORKSPACE/output/archive" \
             -mindepth 1 -maxdepth 1 -type d | sort | tail -1)
 
