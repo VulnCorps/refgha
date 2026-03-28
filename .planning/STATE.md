@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 01-data-pipeline-01-01-PLAN.md
-last_updated: "2026-03-28T20:46:21.944Z"
+stopped_at: Completed 01-data-pipeline-01-02-PLAN.md
+last_updated: "2026-03-28T20:49:11.080Z"
 last_activity: 2026-03-28
 progress:
   total_phases: 4
   completed_phases: 0
   total_plans: 3
-  completed_plans: 1
+  completed_plans: 2
   percent: 0
 ---
 
@@ -26,7 +26,7 @@ See: .planning/PROJECT.md (updated 2026-03-28)
 ## Current Position
 
 Phase: 01 (data-pipeline) — EXECUTING
-Plan: 2 of 3
+Plan: 3 of 3
 Status: Ready to execute
 Last activity: 2026-03-28
 
@@ -53,6 +53,7 @@ Progress: [░░░░░░░░░░] 0%
 
 *Updated after each plan completion*
 | Phase 01-data-pipeline P01 | 2 | 1 tasks | 1 files |
+| Phase 01-data-pipeline P02 | 2 | 1 tasks | 1 files |
 
 ## Accumulated Context
 
@@ -66,6 +67,9 @@ Recent decisions affecting current work:
 - Roadmap: Batch mode explicitly deferred to Phase 4 per PROJECT.md ordering
 - [Phase 01-data-pipeline]: Use inputs.cve_id (not github.event.inputs.cve_id) for modern GHA type preservation
 - [Phase 01-data-pipeline]: Placeholder extraction outputs in plan 01-01; replaced by real jq extraction in plan 01-02
+- [Phase 01-data-pipeline]: Use printf '%s' not echo to pipe URLS into jq/grep — avoids trailing newline creating phantom empty URL
+- [Phase 01-data-pipeline]: tojson at end of jq pipeline produces single-line JSON string required for GITHUB_OUTPUT echo
+- [Phase 01-data-pipeline]: exit 0 in zero-reference branch — job succeeds cleanly when no URLs exist (no archive needed)
 
 ### Pending Todos
 
@@ -79,6 +83,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-03-28T20:46:21.941Z
-Stopped at: Completed 01-data-pipeline-01-01-PLAN.md
+Last session: 2026-03-28T20:49:11.078Z
+Stopped at: Completed 01-data-pipeline-01-02-PLAN.md
 Resume file: None

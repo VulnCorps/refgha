@@ -5,8 +5,8 @@
 ### Data Pipeline
 - [x] **PIPE-01**: User can trigger workflow with a single CVE ID via workflow_dispatch
 - [x] **PIPE-02**: Action fetches CVE JSON from CVEProject/cvelistV5 GitHub raw content (`https://raw.githubusercontent.com/CVEProject/cvelistV5/refs/heads/main/cves/{year}/{numXXX}/CVE-{id}.json`)
-- [ ] **PIPE-03**: Action extracts all reference URLs from the API JSON response
-- [ ] **PIPE-04**: Action handles CVEs with zero references gracefully (no-op, clear summary)
+- [x] **PIPE-03**: Action extracts all reference URLs from the API JSON response
+- [x] **PIPE-04**: Action handles CVEs with zero references gracefully (no-op, clear summary)
 
 ### Archiving
 - [ ] **ARCH-01**: Each reference URL is archived by ArchiveBox running as a Docker one-shot container
@@ -49,8 +49,8 @@
 |--------|-------|--------|
 | PIPE-01 | Phase 1 | Complete |
 | PIPE-02 | Phase 1 | Complete |
-| PIPE-03 | Phase 1 | Pending |
-| PIPE-04 | Phase 1 | Pending |
+| PIPE-03 | Phase 1 | Complete |
+| PIPE-04 | Phase 1 | Complete |
 | ARCH-01 | Phase 2 | Pending |
 | ARCH-02 | Phase 2 | Pending |
 | ARCH-03 | Phase 2 | Pending |

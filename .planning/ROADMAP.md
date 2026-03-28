@@ -32,7 +32,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 
 Plans:
 - [x] 01-01-PLAN.md — Workflow scaffold: workflow_dispatch trigger, CVE ID validation, GitHub raw content fetch
-- [ ] 01-02-PLAN.md — Extraction and output: null-safe jq URL extraction, empty-reference guard, matrix JSON construction
+- [x] 01-02-PLAN.md — Extraction and output: null-safe jq URL extraction, empty-reference guard, matrix JSON construction
 - [ ] 01-03-PLAN.md — Human verification: end-to-end test against CVE-2021-44228, CVE-1999-0001, and invalid input
 
 ### Phase 2: ArchiveBox Integration
