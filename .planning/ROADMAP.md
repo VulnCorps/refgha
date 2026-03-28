@@ -74,7 +74,11 @@ Plans:
   1. User can trigger the workflow with a multi-line list of CVE IDs (or a file reference) via workflow_dispatch
   2. Each CVE in the list is processed through the full single-CVE pipeline independently
   3. The run produces one bundled artifact per CVE in the input list
-**Plans**: TBD
+**Plans**: 2 plans
+
+Plans:
+- [ ] 04-01-PLAN.md — Add workflow_call trigger to archive-cve.yml and create batch-archive.yml with CVE matrix
+- [ ] 04-02-PLAN.md — Structural validation and human end-to-end checkpoint confirming one artifact per CVE
 
 ## Progress
 
@@ -86,4 +90,4 @@ Phases execute in numeric order: 1 → 2 → 3 → 4
 | 1. Data Pipeline | 0/3 | Planned | - |
 | 2. ArchiveBox Integration | 0/2 | Planned | - |
 | 3. Full Single-CVE Workflow | 1/2 | In Progress|  |
-| 4. Batch Mode | 0/? | Not started | - |
+| 4. Batch Mode | 0/2 | Planned | - |
