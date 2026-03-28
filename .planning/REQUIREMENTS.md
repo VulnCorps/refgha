@@ -25,7 +25,7 @@
 - [ ] **TEST-02**: End-to-end test validates the full pipeline with a known CVE ID
 
 ### Batch Mode
-- [ ] **BATCH-01**: Action accepts a list of CVE IDs (file or multi-line input)
+- [x] **BATCH-01**: Action accepts a list of CVE IDs (file or multi-line input)
 
 ## v2 Requirements (Deferred)
 
@@ -61,4 +61,4 @@
 | ART-03 | Phase 3 | Complete |
 | ART-04 | Phase 3 | Complete |
 | TEST-02 | Phase 3 | Pending |
-| BATCH-01 | Phase 4 | Pending |
+| BATCH-01 | Phase 4 | Complete |
