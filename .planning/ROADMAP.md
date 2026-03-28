@@ -44,8 +44,11 @@ Plans:
   2. Only the PDF, screenshot, and WARC extractors are active — no other ArchiveBox extractors run
   3. If the target URL is unreachable or archiving fails, the job fails gracefully without aborting sibling jobs (continue-on-error)
   4. ACT is configured (.actrc) and the archive job can be executed locally via act
-**Plans**: TBD
-**UI hint**: no
+**Plans**: 2 plans
+
+Plans:
+- [ ] 02-01-PLAN.md — ACT configuration (.actrc) and archive job: ArchiveBox one-shot, extractor flags, WARC compression, artifact upload
+- [ ] 02-02-PLAN.md — Local ACT verification: run archive job, confirm pdf.pdf + screenshot.png + warc.tgz produced
 
 ### Phase 3: Full Single-CVE Workflow
 **Goal**: A single CVE ID can be processed end-to-end — prepare, parallel archive fan-out, and artifact collection — producing a single bundled artifact containing all reference archives
@@ -77,6 +80,6 @@ Phases execute in numeric order: 1 → 2 → 3 → 4
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Data Pipeline | 0/3 | Planned | - |
-| 2. ArchiveBox Integration | 0/? | Not started | - |
+| 2. ArchiveBox Integration | 0/2 | Planned | - |
 | 3. Full Single-CVE Workflow | 0/? | Not started | - |
 | 4. Batch Mode | 0/? | Not started | - |
