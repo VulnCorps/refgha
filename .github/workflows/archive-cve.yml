@@ -85,8 +85,7 @@ jobs:
             | map(select(length > 0))
             | to_entries
             | map({"index": .key, "url": .value})
-            | tojson
-          ')
+          ' | jq -c '.')
 
           echo "has_refs=true" >> "$GITHUB_OUTPUT"
           echo "ref_count=${REF_COUNT}" >> "$GITHUB_OUTPUT"
@@ -198,6 +197,7 @@ jobs:
 
           # Count collected files to infer archive outcomes.
           # Each successful archive job produces exactly 3 files: pdf.pdf, screenshot.png, warc.tgz
+          mkdir -p collected/
           TOTAL_FILES=$(find collected/ -type f 2>/dev/null | wc -l | tr -d ' ')
           SUCCESSFUL_ARCHIVES=$(( TOTAL_FILES / 3 ))
 
