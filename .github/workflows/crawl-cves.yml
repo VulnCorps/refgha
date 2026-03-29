@@ -99,6 +99,8 @@ jobs:
           COMMITS_PROCESSED=0
           HIT_CVE_CAP="false"
 
+          PREV_SHA="$LAST_SHA"
+
           for SHA in $COMMIT_SHAS; do
             [ -z "$SHA" ] && continue
 
@@ -125,14 +127,20 @@ jobs:
               CURRENT_COUNT=0
             fi
 
-            LATEST_SHA="$SHA"
             COMMITS_PROCESSED=$((COMMITS_PROCESSED + 1))
 
-            if [ "$MAX_CVES" != "0" ] && [ "$CURRENT_COUNT" -ge "$MAX_CVES" ]; then
-              echo "Hit CVE cap ($MAX_CVES) after $COMMITS_PROCESSED commits" >&2
+            if [ "$MAX_CVES" != "0" ] && [ "$CURRENT_COUNT" -gt "$MAX_CVES" ]; then
+              # Over the cap — rewind SHA to the PREVIOUS commit so this one
+              # gets re-processed next run (no CVEs are lost)
+              LATEST_SHA="$PREV_SHA"
+              echo "Hit CVE cap ($MAX_CVES) after $COMMITS_PROCESSED commits — rewinding SHA to prev commit" >&2
               HIT_CVE_CAP="true"
               break
             fi
+
+            # This commit is fully accounted for — safe to advance
+            LATEST_SHA="$SHA"
+            PREV_SHA="$SHA"
           done
 
           # Deduplicate and cap CVE list
