@@ -52,6 +52,14 @@ jobs:
           LAST_SHA=$(cat .state/last-processed-sha | tr -d '[:space:]')
           echo "Last processed SHA: $LAST_SHA" >&2
 
+          # Check for spillover CVEs from previous run that hit the cap
+          SPILLOVER_FILE=".state/spillover-cves.txt"
+          if [ -f "$SPILLOVER_FILE" ] && [ -s "$SPILLOVER_FILE" ]; then
+            SPILLOVER_COUNT=$(grep -c . "$SPILLOVER_FILE" 2>/dev/null || echo "0")
+            echo "Found $SPILLOVER_COUNT spillover CVEs from previous run" >&2
+            cp "$SPILLOVER_FILE" /tmp/cves_with_refs.txt
+          fi
+
           # Get commits since last SHA (newest first from API, we reverse later)
           PAGE=1
           ALL_SHAS=""
@@ -99,8 +107,6 @@ jobs:
           COMMITS_PROCESSED=0
           HIT_CVE_CAP="false"
 
-          PREV_SHA="$LAST_SHA"
-
           for SHA in $COMMIT_SHAS; do
             [ -z "$SHA" ] && continue
 
@@ -120,40 +126,36 @@ jobs:
               fi
             done
 
-            # Check CVE count after each commit
-            if [ -f /tmp/cves_with_refs.txt ]; then
-              CURRENT_COUNT=$(sort -u /tmp/cves_with_refs.txt | grep -c . 2>/dev/null || echo "0")
-            else
-              CURRENT_COUNT=0
-            fi
-
-            COMMITS_PROCESSED=$((COMMITS_PROCESSED + 1))
-
-            if [ "$MAX_CVES" != "0" ] && [ "$CURRENT_COUNT" -gt "$MAX_CVES" ]; then
-              # Over the cap — rewind SHA to the PREVIOUS commit so this one
-              # gets re-processed next run (no CVEs are lost)
-              LATEST_SHA="$PREV_SHA"
-              echo "Hit CVE cap ($MAX_CVES) after $COMMITS_PROCESSED commits — rewinding SHA to prev commit" >&2
-              HIT_CVE_CAP="true"
-              break
-            fi
-
-            # This commit is fully accounted for — safe to advance
             LATEST_SHA="$SHA"
-            PREV_SHA="$SHA"
+            COMMITS_PROCESSED=$((COMMITS_PROCESSED + 1))
           done
 
-          # Deduplicate and cap CVE list
+          # Deduplicate all discovered CVEs
           if [ -f /tmp/cves_with_refs.txt ]; then
-            UNIQUE_CVES=$(sort -u /tmp/cves_with_refs.txt | head -n "$MAX_CVES")
-            CVE_COUNT=$(echo "$UNIQUE_CVES" | grep -c . 2>/dev/null || echo "0")
+            ALL_UNIQUE=$(sort -u /tmp/cves_with_refs.txt)
+            ALL_COUNT=$(echo "$ALL_UNIQUE" | grep -c . 2>/dev/null || echo "0")
           else
-            UNIQUE_CVES=""
-            CVE_COUNT=0
+            ALL_UNIQUE=""
+            ALL_COUNT=0
+          fi
+
+          # Split into "archive now" (up to cap) and "spillover" (next run)
+          UNIQUE_CVES=$(echo "$ALL_UNIQUE" | head -n "$MAX_CVES")
+          CVE_COUNT=$(echo "$UNIQUE_CVES" | grep -c . 2>/dev/null || echo "0")
+          SPILLOVER=$(echo "$ALL_UNIQUE" | tail -n +"$((MAX_CVES + 1))")
+          SPILLOVER_COUNT=$(echo "$SPILLOVER" | grep -c . 2>/dev/null || echo "0")
+
+          # Write spillover for next run (or clear if none)
+          if [ "$SPILLOVER_COUNT" -gt 0 ]; then
+            echo "$SPILLOVER" > "$SPILLOVER_FILE"
+            HIT_CVE_CAP="true"
+            echo "$SPILLOVER_COUNT CVEs spilled over to next run" >&2
+          else
+            > "$SPILLOVER_FILE"
           fi
 
           REMAINING=$((TOTAL - COMMITS_PROCESSED))
-          echo "Found $CVE_COUNT unique CVEs across $COMMITS_PROCESSED commits ($REMAINING remaining)" >&2
+          echo "Found $ALL_COUNT unique CVEs across $COMMITS_PROCESSED commits — archiving $CVE_COUNT, spilling $SPILLOVER_COUNT ($REMAINING commits remaining)" >&2
 
           # Build JSON array for matrix
           if [ "$CVE_COUNT" -gt 0 ]; then
@@ -179,7 +181,7 @@ jobs:
             echo "| Commits processed | $COMMITS_PROCESSED / $TOTAL |"
             echo "| Commits remaining | $REMAINING |"
             echo "| CVEs to archive | $CVE_COUNT (cap: $MAX_CVES) |"
-            echo "| Hit CVE cap | $HIT_CVE_CAP |"
+            echo "| CVEs spilled to next run | $SPILLOVER_COUNT |"
             echo "| Last SHA | \`${LATEST_SHA:0:12}\` |"
             echo "| Dry run | $DRY_RUN |"
             if [ "$CVE_COUNT" -gt 0 ]; then
@@ -197,8 +199,8 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add .state/last-processed-sha
-          git commit -m "chore: update last-processed-sha to $(cat .state/last-processed-sha | head -c 12)"
+          git add .state/last-processed-sha .state/spillover-cves.txt
+          git commit -m "chore: update crawl state (sha: $(cat .state/last-processed-sha | head -c 12))"
           git push
 
   archive:
