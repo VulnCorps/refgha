@@ -180,6 +180,8 @@ jobs:
             ${{ env.SNAPSHOT_DIR }}/output.pdf
             ${{ env.SNAPSHOT_DIR }}/screenshot.png
             ${{ env.SNAPSHOT_DIR }}/warc.tgz
+            ${{ env.SNAPSHOT_DIR }}/s3_prefix.txt
+            ${{ env.SNAPSHOT_DIR }}/ref_url.txt
           if-no-files-found: error
 
       - name: Upload to S3
@@ -223,6 +225,10 @@ jobs:
           aws s3 cp "${SNAPSHOT_DIR}/screenshot.png"  "s3://${S3_BUCKET}/${S3_PREFIX}/screenshot.png"
           aws s3 cp "${SNAPSHOT_DIR}/warc.tgz"        "s3://${S3_BUCKET}/${S3_PREFIX}/warc.tgz"
 
+          # Write S3 prefix to file for collect job to pick up via artifact
+          echo "${S3_PREFIX}" > "${SNAPSHOT_DIR}/s3_prefix.txt"
+          echo "${REF_URL}" > "${SNAPSHOT_DIR}/ref_url.txt"
+
           echo "Uploaded 3 files to s3://${S3_BUCKET}/${S3_PREFIX}/" >&2
 
   collect:
@@ -245,16 +251,62 @@ jobs:
           if-no-files-found: warn
           retention-days: 90
 
+      - name: Update CVE index in S3
+        if: always()
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_REGION: ${{ secrets.AWS_REGION || 'us-east-1' }}
+          S3_BUCKET: archiver-demo-v1-public
+        run: |
+          set -euo pipefail
+          mkdir -p collected/
+
+          CVE_ID="${{ inputs.cve_id }}"
+          INDEX_KEY="v2/index/${CVE_ID}.json"
+
+          # Download existing CVE index entry (or start fresh)
+          aws s3 cp "s3://${S3_BUCKET}/${INDEX_KEY}" /tmp/cve_index.json 2>/dev/null || echo '{"cve_id":"'$CVE_ID'","snapshots":[]}' > /tmp/cve_index.json
+
+          # Collect s3_prefix + ref_url pairs from this run's artifacts
+          NEW_ENTRIES="[]"
+          for PREFIX_FILE in $(find collected/ -name 's3_prefix.txt' 2>/dev/null); do
+            DIR=$(dirname "$PREFIX_FILE")
+            S3_PREFIX=$(cat "$PREFIX_FILE" | tr -d '[:space:]')
+            REF_URL=$(cat "${DIR}/ref_url.txt" 2>/dev/null | tr -d '[:space:]' || echo "unknown")
+            TIMESTAMP=$(echo "$S3_PREFIX" | rev | cut -d'/' -f1 | rev)
+
+            NEW_ENTRIES=$(echo "$NEW_ENTRIES" | jq --arg url "$REF_URL" --arg ts "$TIMESTAMP" --arg prefix "$S3_PREFIX" \
+              '. + [{"url": $url, "timestamp": $ts, "s3_prefix": $prefix, "files": ["output.pdf", "screenshot.png", "warc.tgz"]}]')
+          done
+
+          # Merge new entries into existing index (avoid duplicates by s3_prefix)
+          python3 -c "
+          import json
+          idx = json.load(open('/tmp/cve_index.json'))
+          new = json.loads('$NEW_ENTRIES')
+          existing_prefixes = {s['s3_prefix'] for s in idx.get('snapshots', [])}
+          for entry in new:
+              if entry['s3_prefix'] not in existing_prefixes:
+                  idx.setdefault('snapshots', []).append(entry)
+          idx['snapshots'].sort(key=lambda x: x['timestamp'], reverse=True)
+          idx['last_updated'] = '$(date -u +"%Y-%m-%dT%H:%M:%SZ")'
+          json.dump(idx, open('/tmp/cve_index_updated.json', 'w'), indent=2)
+          print(f'{len(idx[\"snapshots\"])} total snapshots for {idx[\"cve_id\"]}')
+          "
+
+          aws s3 cp /tmp/cve_index_updated.json "s3://${S3_BUCKET}/${INDEX_KEY}" \
+            --content-type application/json
+
       - name: Write job summary
         if: always()
         run: |
           set -euo pipefail
-
-          # Count collected files to infer archive outcomes.
-          # Each successful archive job produces exactly 3 files: pdf.pdf, screenshot.png, warc.tgz
           mkdir -p collected/
-          TOTAL_FILES=$(find collected/ -type f 2>/dev/null | wc -l | tr -d ' ')
-          SUCCESSFUL_ARCHIVES=$(( TOTAL_FILES / 3 ))
+
+          # Count archive files (exclude metadata txt files)
+          ARCHIVE_FILES=$(find collected/ -type f \( -name '*.pdf' -o -name '*.png' -o -name '*.tgz' \) 2>/dev/null | wc -l | tr -d ' ')
+          SUCCESSFUL_ARCHIVES=$(( ARCHIVE_FILES / 3 ))
 
           {
             echo "### ${{ inputs.cve_id }}: Archive Run Complete"
@@ -262,5 +314,5 @@ jobs:
             echo "| Metric | Count |"
             echo "|--------|-------|"
             echo "| Archives succeeded | ${SUCCESSFUL_ARCHIVES} |"
-            echo "| Files collected | ${TOTAL_FILES} |"
+            echo "| Files collected | ${ARCHIVE_FILES} |"
           } >> "$GITHUB_STEP_SUMMARY"

@@ -1,0 +1,301 @@
+name: Crawl CVE Updates
+
+on:
+  schedule:
+    - cron: '0 */6 * * *'  # Every 6 hours
+  workflow_dispatch:
+    inputs:
+      max_commits:
+        description: 'Max commits to process (0 = unlimited)'
+        required: false
+        default: '50'
+        type: string
+      dry_run:
+        description: 'Dry run — log what would be archived but skip actual archival'
+        required: false
+        default: 'false'
+        type: string
+
+jobs:
+  crawl:
+    name: Crawl cvelistV5 commits
+    runs-on: ubuntu-latest
+    outputs:
+      cves_found: ${{ steps.crawl.outputs.cves_found }}
+      cve_list: ${{ steps.crawl.outputs.cve_list }}
+    steps:
+      - name: Checkout this repo
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Crawl new commits for CVE references
+        id: crawl
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          MAX_COMMITS="${{ inputs.max_commits || '50' }}"
+          DRY_RUN="${{ inputs.dry_run || 'false' }}"
+
+          # Read last processed SHA
+          LAST_SHA=$(cat .state/last-processed-sha | tr -d '[:space:]')
+          echo "Last processed SHA: $LAST_SHA" >&2
+
+          # Get commits since last SHA (newest first from API, we reverse later)
+          PAGE=1
+          ALL_SHAS=""
+          while true; do
+            RESPONSE=$(gh api "repos/CVEProject/cvelistV5/commits?sha=main&since=$(gh api "repos/CVEProject/cvelistV5/commits/${LAST_SHA}" --jq '.commit.committer.date')&per_page=100&page=${PAGE}" 2>&1)
+            BATCH=$(echo "$RESPONSE" | jq -r '.[].sha' 2>/dev/null || true)
+
+            if [ -z "$BATCH" ]; then
+              break
+            fi
+
+            ALL_SHAS="${ALL_SHAS}
+          ${BATCH}"
+            COUNT=$(echo "$BATCH" | wc -l | tr -d ' ')
+            if [ "$COUNT" -lt 100 ]; then
+              break
+            fi
+            PAGE=$((PAGE + 1))
+          done
+
+          # Reverse to chronological order, remove the last-processed SHA itself
+          COMMIT_SHAS=$(echo "$ALL_SHAS" | grep -v "^$" | tac | grep -v "^${LAST_SHA}$" || true)
+
+          TOTAL=$(echo "$COMMIT_SHAS" | grep -c . 2>/dev/null || echo "0")
+          echo "Found $TOTAL new commits since $LAST_SHA" >&2
+
+          if [ "$TOTAL" -eq 0 ]; then
+            echo "cves_found=0" >> "$GITHUB_OUTPUT"
+            echo "cve_list=[]" >> "$GITHUB_OUTPUT"
+            echo "### Crawl: No new commits" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          # Apply max_commits limit
+          if [ "$MAX_COMMITS" != "0" ] && [ "$TOTAL" -gt "$MAX_COMMITS" ]; then
+            COMMIT_SHAS=$(echo "$COMMIT_SHAS" | head -n "$MAX_COMMITS")
+            TOTAL="$MAX_COMMITS"
+            echo "Limiting to $MAX_COMMITS commits" >&2
+          fi
+
+          # Walk commits, collect unique CVE IDs that have references
+          CVES_WITH_REFS=""
+          LATEST_SHA="$LAST_SHA"
+
+          echo "$COMMIT_SHAS" | while read -r SHA; do
+            [ -z "$SHA" ] && continue
+
+            # Get changed CVE files in this commit
+            FILES=$(gh api "repos/CVEProject/cvelistV5/commits/${SHA}" \
+              --jq '[.files[] | select(.filename | test("^cves/.*\\.json$")) | select(.filename | test("delta|deltaLog") | not) | .filename] | .[]' 2>/dev/null || true)
+
+            for FILE in $FILES; do
+              # Extract CVE ID from filename: cves/2025/29xxx/CVE-2025-29002.json → CVE-2025-29002
+              CVE_ID=$(basename "$FILE" .json)
+
+              # Fetch the CVE JSON and check if it has references
+              CVE_URL="https://raw.githubusercontent.com/CVEProject/cvelistV5/main/${FILE}"
+              REF_COUNT=$(curl -sf "$CVE_URL" | jq '[(.containers.cna.references // []) | .[].url] | length' 2>/dev/null || echo "0")
+
+              if [ "$REF_COUNT" -gt 0 ]; then
+                echo "$CVE_ID" >> /tmp/cves_with_refs.txt
+              fi
+            done
+
+            echo "$SHA" > /tmp/latest_sha.txt
+          done
+
+          # Read results (subshell workaround for while-read pipe)
+          if [ -f /tmp/latest_sha.txt ]; then
+            LATEST_SHA=$(cat /tmp/latest_sha.txt)
+          fi
+
+          # Deduplicate CVE list
+          if [ -f /tmp/cves_with_refs.txt ]; then
+            UNIQUE_CVES=$(sort -u /tmp/cves_with_refs.txt)
+            CVE_COUNT=$(echo "$UNIQUE_CVES" | grep -c . 2>/dev/null || echo "0")
+          else
+            UNIQUE_CVES=""
+            CVE_COUNT=0
+          fi
+
+          echo "Found $CVE_COUNT unique CVEs with references across $TOTAL commits" >&2
+
+          # Build JSON array for matrix
+          if [ "$CVE_COUNT" -gt 0 ]; then
+            CVE_JSON=$(printf '%s' "$UNIQUE_CVES" | jq -R -s 'split("\n") | map(select(length > 0))' | jq -c '.')
+          else
+            CVE_JSON="[]"
+          fi
+
+          echo "cves_found=${CVE_COUNT}" >> "$GITHUB_OUTPUT"
+          echo "cve_list=${CVE_JSON}" >> "$GITHUB_OUTPUT"
+
+          # Update last processed SHA (only if not dry run)
+          if [ "$DRY_RUN" != "true" ]; then
+            echo "$LATEST_SHA" > .state/last-processed-sha
+          fi
+          echo "latest_sha=${LATEST_SHA}" >> "$GITHUB_OUTPUT"
+
+          {
+            echo "### Crawl Results"
+            echo ""
+            echo "| Metric | Value |"
+            echo "|--------|-------|"
+            echo "| Commits processed | $TOTAL |"
+            echo "| CVEs with references | $CVE_COUNT |"
+            echo "| Last SHA | \`${LATEST_SHA:0:12}\` |"
+            echo "| Dry run | $DRY_RUN |"
+            if [ "$CVE_COUNT" -gt 0 ]; then
+              echo ""
+              echo "**CVEs to archive:**"
+              echo "$UNIQUE_CVES" | while read -r cve; do
+                echo "- $cve"
+              done
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Commit updated SHA
+        if: inputs.dry_run != 'true' && steps.crawl.outputs.cves_found != '0'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add .state/last-processed-sha
+          git commit -m "chore: update last-processed-sha to $(cat .state/last-processed-sha | head -c 12)"
+          git push
+
+  archive:
+    name: Archive ${{ matrix.cve_id }}
+    needs: crawl
+    if: needs.crawl.outputs.cves_found != '0' && inputs.dry_run != 'true'
+    strategy:
+      fail-fast: false
+      max-parallel: 5
+      matrix:
+        cve_id: ${{ fromJSON(needs.crawl.outputs.cve_list) }}
+    uses: ./.github/workflows/archive-cve.yml
+    with:
+      cve_id: ${{ matrix.cve_id }}
+    secrets: inherit
+
+  update-index:
+    name: Update S3 index
+    needs: [crawl, archive]
+    if: always() && needs.crawl.outputs.cves_found != '0' && inputs.dry_run != 'true'
+    runs-on: ubuntu-latest
+    env:
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      AWS_REGION: ${{ secrets.AWS_REGION || 'us-east-1' }}
+      S3_BUCKET: archiver-demo-v1-public
+    steps:
+      - name: Build and upload index
+        run: |
+          set -euo pipefail
+
+          # Download existing index (or start fresh)
+          aws s3 cp "s3://${S3_BUCKET}/v2/index.json" /tmp/index.json 2>/dev/null || echo '{}' > /tmp/index.json
+
+          # List all objects under v2/ to rebuild index from actual S3 state
+          aws s3 ls "s3://${S3_BUCKET}/v2/" --recursive \
+            | grep -E '(output\.pdf|screenshot\.png|warc\.tgz)$' \
+            | awk '{print $4}' > /tmp/s3_files.txt
+
+          # Parse S3 keys into index entries
+          # Key format: v2/<domain>/<path>[__q__<query>]/<timestamp>/<file>
+          python3 - <<'PYEOF'
+          import json, re, sys
+          from collections import defaultdict
+          from urllib.parse import unquote
+
+          index = json.load(open('/tmp/index.json'))
+
+          # Group files by their parent path (everything before the filename)
+          snapshots = defaultdict(list)
+          with open('/tmp/s3_files.txt') as f:
+              for line in f:
+                  key = line.strip()
+                  if not key:
+                      continue
+                  parts = key.split('/')
+                  filename = parts[-1]
+                  timestamp = parts[-2]
+                  # Everything between v2/ and timestamp is the URL path
+                  url_parts = parts[1:-2]  # skip 'v2' prefix and timestamp/filename
+
+                  # Reconstruct the original URL from the S3 key
+                  domain = url_parts[0]
+                  path_parts = url_parts[1:]
+                  uri_path = '/'.join(path_parts)
+
+                  # Split on __q__ to separate path from query
+                  if '__q__' in uri_path:
+                      path_part, query_part = uri_path.rsplit('__q__', 1)
+                      original_url = f"https://{domain}/{path_part}?{query_part}"
+                  else:
+                      original_url = f"https://{domain}/{uri_path}"
+
+                  snapshot_key = f"{'/'.join(url_parts)}/{timestamp}"
+                  snapshots[snapshot_key].append({
+                      'file': filename,
+                      's3_key': key
+                  })
+
+          # Build CVE index by scanning for CVE IDs in the URL paths
+          # We need to map CVE → snapshots. Since URLs are reference URLs (not CVE-specific),
+          # we build a url → snapshots map
+          url_index = {}
+          for snapshot_key, files in snapshots.items():
+              parts = snapshot_key.split('/')
+              timestamp = parts[-1]
+              url_parts = parts[:-1]
+              domain = url_parts[0]
+              uri_path = '/'.join(url_parts[1:])
+
+              if '__q__' in uri_path:
+                  path_part, query_part = uri_path.rsplit('__q__', 1)
+                  original_url = f"https://{domain}/{path_part}?{query_part}"
+              else:
+                  original_url = f"https://{domain}/{uri_path}"
+
+              if original_url not in url_index:
+                  url_index[original_url] = []
+
+              url_index[original_url].append({
+                  'timestamp': timestamp,
+                  's3_prefix': f"v2/{'/'.join(url_parts)}/{timestamp}",
+                  'files': [f['file'] for f in files]
+              })
+
+          # Sort snapshots by timestamp (newest first)
+          for url in url_index:
+              url_index[url].sort(key=lambda x: x['timestamp'], reverse=True)
+
+          # Write the index
+          output = {
+              'generated': '$(date -u +"%Y-%m-%dT%H:%M:%SZ")',
+              'total_urls': len(url_index),
+              'total_snapshots': sum(len(v) for v in url_index.values()),
+              'urls': url_index
+          }
+
+          with open('/tmp/index_new.json', 'w') as f:
+              json.dump(output, f, indent=2)
+
+          print(f"Index: {len(url_index)} URLs, {sum(len(v) for v in url_index.values())} snapshots")
+          PYEOF
+
+          # Upload new index
+          aws s3 cp /tmp/index_new.json "s3://${S3_BUCKET}/v2/index.json" \
+            --content-type application/json
+
+          {
+            echo "### Index Updated"
+            echo ""
+            echo "$(python3 -c "import json; d=json.load(open('/tmp/index_new.json')); print(f'**{d[\"total_urls\"]}** URLs, **{d[\"total_snapshots\"]}** snapshots')")"
+          } >> "$GITHUB_STEP_SUMMARY"
