@@ -1,0 +1,1 @@
+{"domain":"nitro.com","url_count":1,"urls":[{"original_url":"https://nitro.com","path":"/","query":"","snapshots":[{"timestamp":"20260413-165855","s3_prefix":"v2/nitro.com/20260413-165855","files":["output.pdf","screenshot.png","warc.tgz"]},{"timestamp":"20260413-165849","s3_prefix":"v2/nitro.com/20260413-165849","files":["output.pdf","screenshot.png","warc.tgz"]}]}]}
