@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CVE Archive — Stats</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
+<style>
+  :root {
+    --bg: #0f1117; --surface: #1a1d27; --border: #2a2d3a;
+    --text: #e2e8f0; --muted: #8892a4;
+    --c1: #6366f1; --c2: #22d3ee; --c3: #f59e0b; --c4: #10b981; --c5: #ef4444;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--text); font-family: system-ui, sans-serif; padding: 2rem; }
+  h1 { font-size: 1.5rem; margin-bottom: .25rem; }
+  .meta { color: var(--muted); font-size: .85rem; margin-bottom: 2rem; }
+  .meta a { color: var(--c2); text-decoration: none; }
+  .stats-row { display: flex; gap: 1rem; flex-wrap: wrap; margin-bottom: 2.5rem; }
+  .stat-card { background: var(--surface); border: 1px solid var(--border); border-radius: 8px;
+                padding: 1.25rem 1.75rem; flex: 1; min-width: 140px; }
+  .stat-card .n { font-size: 2rem; font-weight: 700; }
+  .stat-card .l { font-size: .75rem; color: var(--muted); text-transform: uppercase;
+                   letter-spacing: .05em; margin-top: .2rem; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(520px, 1fr)); gap: 1.5rem; }
+  .chart-card { background: var(--surface); border: 1px solid var(--border); border-radius: 8px;
+                 padding: 1.5rem; }
+  .chart-card h2 { font-size: .8rem; color: var(--muted); margin-bottom: 1.25rem;
+                    text-transform: uppercase; letter-spacing: .06em; }
+  .chart-card.wide { grid-column: 1 / -1; }
+  canvas { max-height: 300px; }
+</style>
+</head>
+<body>
+<h1>CVE Reference Archive — Stats</h1>
+<p class="meta">Generated 2026-05-05 14:02 UTC &nbsp;·&nbsp; <a href="/">← Archive</a></p>
+
+<div class="stats-row">
+  <div class="stat-card"><div class="n">4,418</div><div class="l">CVEs</div></div>
+  <div class="stat-card"><div class="n">34,541</div><div class="l">Snapshots</div></div>
+  <div class="stat-card"><div class="n">1,007</div><div class="l">Domains</div></div>
+  <div class="stat-card"><div class="n">7</div><div class="l">Avg snapshots / CVE</div></div>
+</div>
+
+<div class="grid">
+
+  <div class="chart-card wide">
+    <h2>Snapshots archived per day</h2>
+    <canvas id="snapTimeline"></canvas>
+  </div>
+
+  <div class="chart-card wide">
+    <h2>New CVEs added per day</h2>
+    <canvas id="cveTimeline"></canvas>
+  </div>
+
+  <div class="chart-card">
+    <h2>Top 25 domains by snapshot count</h2>
+    <canvas id="domains"></canvas>
+  </div>
+
+  <div class="chart-card">
+    <h2>CVEs by publication year</h2>
+    <canvas id="cveYears"></canvas>
+  </div>
+
+  <div class="chart-card">
+    <h2>Re-archive interval coverage</h2>
+    <canvas id="intervals"></canvas>
+  </div>
+
+</div>
+<script>
+const DATA = {"totals": {"cves": 4418, "snapshots": 34541, "domains": 1007, "generated": "2026-05-05 14:02 UTC"}, "snap_days": ["2026-03-29", "2026-03-30", "2026-03-31", "2026-04-01", "2026-04-02", "2026-04-03", "2026-04-04", "2026-04-05", "2026-04-06", "2026-04-07", "2026-04-08", "2026-04-09", "2026-04-10", "2026-04-11", "2026-04-12", "2026-04-13", "2026-04-14", "2026-04-15", "2026-04-16", "2026-04-17", "2026-04-18", "2026-04-19", "2026-04-20", "2026-04-21", "2026-04-22", "2026-04-23", "2026-04-24", "2026-04-25", "2026-04-26", "2026-04-27", "2026-04-28", "2026-04-29", "2026-04-30", "2026-05-01", "2026-05-02", "2026-05-03", "2026-05-04", "2026-05-05"], "snap_vals": [927, 483, 510, 1139, 1193, 970, 664, 858, 1155, 1028, 1026, 886, 1362, 819, 695, 1061, 1103, 815, 1165, 1386, 1089, 780, 1042, 919, 1023, 954, 1203, 811, 749, 694, 551, 828, 958, 952, 851, 726, 712, 454], "cve_days": ["2026-03-24", "2026-03-29", "2026-03-30", "2026-03-31", "2026-04-01", "2026-04-02", "2026-04-03", "2026-04-04", "2026-04-05", "2026-04-06", "2026-04-07", "2026-04-08", "2026-04-09", "2026-04-10", "2026-04-11", "2026-04-12", "2026-04-13", "2026-04-14", "2026-04-15", "2026-04-16", "2026-04-17", "2026-04-18", "2026-04-19", "2026-04-20", "2026-04-21", "2026-04-22", "2026-04-23", "2026-04-24", "2026-04-25", "2026-04-26", "2026-04-27", "2026-04-28", "2026-04-29", "2026-04-30", "2026-05-01", "2026-05-02", "2026-05-03", "2026-05-04", "2026-05-05"], "cve_vals": [3, 345, 140, 168, 176, 170, 151, 53, 85, 148, 169, 160, 112, 151, 47, 52, 124, 159, 116, 140, 133, 45, 28, 139, 107, 137, 113, 138, 55, 60, 128, 115, 98, 105, 94, 64, 45, 104, 41], "domain_labels": ["access.redhat.com", "github.com", "git.kernel.org", "www.vulncheck.com", "vuldb.com", "www.exploit-db.com", "plugins.trac.wordpress.org", "bugzilla.redhat.com", "www.wordfence.com", "patchstack.com", "support.apple.com", "msrc.microsoft.com", "gitlab.com", "lists.apache.org", "www.mozilla.org", "www.oracle.com", "www.tp-link.com", "www.openwall.com", "gist.github.com", "raw.githubusercontent.com", "www.dell.com", "hackerone.com", "gitlab.gnome.org", "www.cisa.gov", "www.ibm.com"], "domain_vals": [6069, 5803, 2661, 1842, 1794, 1522, 1440, 772, 608, 577, 413, 381, 319, 259, 216, 190, 183, 177, 174, 157, 152, 144, 134, 133, 118], "years": ["1999", "2005", "2006", "2008", "2009", "2010", "2011", "2012", "2013", "2014", "2015", "2016", "2017", "2018", "2019", "2020", "2021", "2022", "2023", "2024", "2025", "2026"], "year_vals": [1, 1, 2, 1, 13, 6, 7, 18, 10, 1, 21, 45, 26, 142, 172, 21, 30, 48, 83, 160, 668, 2942], "interval_labels": ["not yet archived", "initial only", "initial + 3-day", "initial + 3 + 10-day", "initial + 3 + 10 + 30-day"], "interval_vals": [0, 1845, 695, 1366, 512]};
+const GRID = { color: "rgba(255,255,255,.06)" };
+const TICK = { color: "#8892a4", font: { size: 11 } };
+const TIP  = { backgroundColor: "#1a1d27", borderColor: "#2a2d3a", borderWidth: 1,
+                titleColor: "#e2e8f0", bodyColor: "#8892a4" };
+
+new Chart(document.getElementById("snapTimeline"), {
+  type: "bar",
+  data: {
+    labels: DATA.snap_days,
+    datasets: [{ label: "Snapshots", data: DATA.snap_vals,
+      backgroundColor: "rgba(99,102,241,.75)", borderRadius: 2, borderSkipped: false }]
+  },
+  options: { responsive: true,
+    plugins: { legend: { display: false }, tooltip: TIP },
+    scales: { x: { grid: GRID, ticks: { ...TICK, maxTicksLimit: 14 } }, y: { grid: GRID, ticks: TICK } }
+  }
+});
+
+new Chart(document.getElementById("cveTimeline"), {
+  type: "bar",
+  data: {
+    labels: DATA.cve_days,
+    datasets: [{ label: "CVEs", data: DATA.cve_vals,
+      backgroundColor: "rgba(34,211,238,.75)", borderRadius: 2, borderSkipped: false }]
+  },
+  options: { responsive: true,
+    plugins: { legend: { display: false }, tooltip: TIP },
+    scales: { x: { grid: GRID, ticks: { ...TICK, maxTicksLimit: 14 } }, y: { grid: GRID, ticks: TICK } }
+  }
+});
+
+new Chart(document.getElementById("domains"), {
+  type: "bar",
+  data: {
+    labels: DATA.domain_labels,
+    datasets: [{ label: "Snapshots", data: DATA.domain_vals,
+      backgroundColor: "rgba(245,158,11,.75)", borderRadius: 3, borderSkipped: false }]
+  },
+  options: { indexAxis: "y", responsive: true,
+    plugins: { legend: { display: false }, tooltip: TIP },
+    scales: { x: { grid: GRID, ticks: TICK },
+               y: { grid: { display: false }, ticks: { ...TICK, font: { size: 10 } } } }
+  }
+});
+
+new Chart(document.getElementById("cveYears"), {
+  type: "bar",
+  data: {
+    labels: DATA.years,
+    datasets: [{ label: "CVEs", data: DATA.year_vals,
+      backgroundColor: "rgba(16,185,129,.75)", borderRadius: 3, borderSkipped: false }]
+  },
+  options: { responsive: true,
+    plugins: { legend: { display: false }, tooltip: TIP },
+    scales: { x: { grid: GRID, ticks: { ...TICK, maxRotation: 45 } }, y: { grid: GRID, ticks: TICK } }
+  }
+});
+
+new Chart(document.getElementById("intervals"), {
+  type: "doughnut",
+  data: {
+    labels: DATA.interval_labels,
+    datasets: [{ data: DATA.interval_vals,
+      backgroundColor: ["rgba(99,102,241,.85)","rgba(34,211,238,.85)",
+        "rgba(245,158,11,.85)","rgba(16,185,129,.85)","rgba(239,68,68,.85)"],
+      borderColor: "#1a1d27", borderWidth: 2 }]
+  },
+  options: { responsive: true,
+    plugins: {
+      legend: { position: "right", labels: { color: "#8892a4", font: { size: 11 } } },
+      tooltip: TIP
+    }
+  }
+});
+</script>
+</body>
+</html>
