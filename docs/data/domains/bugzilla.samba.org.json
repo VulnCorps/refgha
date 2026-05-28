@@ -1,0 +1,1 @@
+{"domain":"bugzilla.samba.org","url_count":1,"urls":[{"original_url":"https://bugzilla.samba.org/show_bug.cgi?id=16003","path":"/show_bug.cgi","query":"id=16003","snapshots":[{"timestamp":"20260528-064540","s3_prefix":"v2/bugzilla.samba.org/show_bug.cgi__q__id=16003/20260528-064540","files":["output.pdf","screenshot.png","warc.tgz"]}]}]}
