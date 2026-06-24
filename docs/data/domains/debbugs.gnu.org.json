@@ -1,0 +1,1 @@
+{"domain":"debbugs.gnu.org","url_count":1,"urls":[{"original_url":"https://debbugs.gnu.org/cgi/bugreport.cgi?bug=78507","path":"/cgi/bugreport.cgi","query":"bug=78507","snapshots":[{"timestamp":"20260624-104353","s3_prefix":"v2/debbugs.gnu.org/cgi/bugreport.cgi__q__bug=78507/20260624-104353","files":["output.pdf","screenshot.png","warc.tgz"]}]}]}
