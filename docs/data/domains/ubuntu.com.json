@@ -1,0 +1,1 @@
+{"domain":"ubuntu.com","url_count":1,"urls":[{"original_url":"https://ubuntu.com/security/CVE-2026-11386","path":"/security/CVE-2026-11386","query":"","snapshots":[{"timestamp":"20260716-132605","s3_prefix":"v2/ubuntu.com/security/CVE-2026-11386/20260716-132605","files":["output.pdf","screenshot.png","warc.tgz"]}]}]}
