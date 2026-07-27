@@ -36,6 +36,17 @@ flowchart TD
 
     R2 -->|per CVE| archive
 
+    subgraph backfill ["backfill-cves.yml  (every 2h :45, idle-only)"]
+        B1[walk cvelistV5
+ newest → oldest
+ from .state/ cursor]
+        B2[skip already-archived
+ cap 10/run]
+        B1 --> B2
+    end
+
+    B2 -->|per CVE| archive
+
     subgraph archive ["archive-cve.yml"]
         direction LR
         P[prepare
@@ -109,8 +120,11 @@ GitHub Pages: docs/
 | `batch-archive.yml`  | manual                   | Archive a list of CVEs                |
 | `crawl-cves.yml`     | hourly `:00`             | Discover and queue new CVEs           |
 | `rearchive.yml`      | hourly `:15`             | Re-archive on 3/10/30/90-day schedule |
+| `backfill-cves.yml`  | every 2 h `:45`          | Backfill pre-tailing CVEs, newest first (only when pipeline is idle) |
 | `generate-site.yml`  | hourly `:30`             | Rebuild static site data from S3      |
 | `generate-stats.yml` | nightly `02:00`          | Rebuild stats page from S3            |
+
+**Backfill:** Tailing began circa March 2026, so older CVEs were never archived. `backfill-cves.yml` walks cvelistV5 in reverse chronological order (CVE year/number descending) from a cursor in `.state/backfill-cursor`, skipping anything already in the `schedule.json` ledger or the crawler's spillover queue. It defers itself whenever a crawl / re-archive / archive run is active, archives at most 10 CVEs per cycle, and registers backfilled CVEs with all re-archive intervals pre-completed so historical content isn't re-snapshotted. The cursor becomes `DONE` once it reaches 1999.
 
 **Manual trigger — single CVE:**
 

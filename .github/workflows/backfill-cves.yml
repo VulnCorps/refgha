@@ -1,0 +1,349 @@
+name: Backfill CVE Archive
+
+# De-prioritized backfill queue (issue #13).
+# Tailing via crawl-cves.yml started circa March 2026 — everything older was
+# never archived. This workflow walks CVEProject/cvelistV5 in reverse
+# chronological order (year desc, CVE number desc), skips CVEs already
+# archived, and feeds small batches into archive-cve.yml.
+#
+# De-prioritization: it only does work when the live pipeline is idle — if a
+# crawl, re-archive, or archive run is in progress or queued, the cycle is
+# skipped and retried at the next schedule tick.
+
+on:
+  schedule:
+    - cron: '45 */2 * * *'  # Every 2 hours at :45 — offset from crawl (:00), rearchive (:15), site (:30)
+  workflow_dispatch:
+    inputs:
+      max_cves:
+        description: 'Max CVEs to archive per run'
+        required: false
+        default: '10'
+        type: string
+      max_scan:
+        description: 'Max unarchived CVEs to examine (network fetches) per run'
+        required: false
+        default: '200'
+        type: string
+      min_year:
+        description: 'Oldest CVE year to backfill (cursor stops here)'
+        required: false
+        default: '1999'
+        type: string
+      dry_run:
+        description: 'Dry run — log what would be archived, do not archive or move cursor'
+        required: false
+        default: 'false'
+        type: string
+      force:
+        description: 'Run even if the live pipeline is busy'
+        required: false
+        default: 'false'
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: cve-backfill
+  cancel-in-progress: false
+
+jobs:
+  scan:
+    name: Scan for backfill candidates
+    runs-on: ubuntu-latest
+    outputs:
+      cves_found: ${{ steps.scan.outputs.cves_found }}
+      cve_list: ${{ steps.scan.outputs.cve_list }}
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      AWS_REGION: ${{ secrets.AWS_REGION || 'us-east-1' }}
+      S3_BUCKET: archiver-demo-v1-public
+    steps:
+      - name: Checkout this repo
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Scan cvelistV5 for unarchived CVEs
+        id: scan
+        env:
+          MAX_CVES: ${{ inputs.max_cves || '10' }}
+          MAX_SCAN: ${{ inputs.max_scan || '200' }}
+          MIN_YEAR: ${{ inputs.min_year || '1999' }}
+          DRY_RUN: ${{ inputs.dry_run || 'false' }}
+          FORCE: ${{ inputs.force || 'false' }}
+        run: |
+          set -euo pipefail
+
+          # --- De-prioritization gate: yield to the live pipeline ---
+          if [ "$FORCE" != "true" ]; then
+            BUSY_COUNT=$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs?per_page=100" --jq '
+              [.workflow_runs[]
+               | select(.status == "in_progress" or .status == "queued")
+               | select(.name == "Crawl CVE Updates"
+                     or .name == "Re-archive Scheduled References"
+                     or .name == "Archive CVE References"
+                     or .name == "Batch Archive CVE References")
+              ] | length')
+
+            if [ "$BUSY_COUNT" -gt 0 ]; then
+              echo "Live pipeline busy ($BUSY_COUNT active run(s)) — deferring backfill" >&2
+              echo "cves_found=0" >> "$GITHUB_OUTPUT"
+              echo "cve_list=[]" >> "$GITHUB_OUTPUT"
+              echo "cursor_changed=false" >> "$GITHUB_OUTPUT"
+              {
+                echo "### Backfill: Deferred"
+                echo ""
+                echo "Live pipeline has $BUSY_COUNT active run(s). Will retry next cycle."
+              } >> "$GITHUB_STEP_SUMMARY"
+              exit 0
+            fi
+          fi
+
+          # --- Load the archived-CVE ledger (schedule.json) + pending spillover ---
+          aws s3 cp "s3://${S3_BUCKET}/v2/schedule.json" /tmp/schedule.json 2>/dev/null \
+            || echo '{"entries":[]}' > /tmp/schedule.json
+
+          # --- Walk cvelistV5 newest → oldest from the cursor ---
+          python3 - <<'PYEOF'
+          import json, os, re, subprocess, sys
+
+          MAX_CVES = int(os.environ['MAX_CVES'])
+          MAX_SCAN = int(os.environ['MAX_SCAN'])
+          MIN_YEAR = int(os.environ['MIN_YEAR'])
+          DRY_RUN = os.environ['DRY_RUN'] == 'true'
+          LIST_BUDGET = 300  # hard cap on directory-listing API calls per run
+
+          CURSOR_FILE = '.state/backfill-cursor'
+
+          def gh_api(path):
+              r = subprocess.run(['gh', 'api', path], capture_output=True, text=True)
+              if r.returncode != 0:
+                  raise RuntimeError(f"gh api {path} failed: {r.stderr[:300]}")
+              return json.loads(r.stdout)
+
+          def write_outputs(found, cve_json, cursor_changed):
+              with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
+                  f.write(f"cves_found={found}\n")
+                  f.write(f"cve_list={cve_json}\n")
+                  f.write(f"cursor_changed={'true' if cursor_changed else 'false'}\n")
+
+          # Read cursor: last CVE ID scanned (we resume strictly below it),
+          # 'DONE' when the backfill has reached MIN_YEAR, empty = start fresh.
+          cursor = ''
+          if os.path.exists(CURSOR_FILE):
+              cursor = open(CURSOR_FILE).read().strip()
+
+          if cursor == 'DONE':
+              print("Backfill already complete (cursor=DONE)", file=sys.stderr)
+              write_outputs(0, '[]', False)
+              with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as f:
+                  f.write("### Backfill: Complete\n\nCursor is `DONE` — nothing left to backfill.\n")
+              sys.exit(0)
+
+          cur_year, cur_num = None, None
+          m = re.match(r'^CVE-(\d{4})-(\d+)$', cursor)
+          if m:
+              cur_year, cur_num = int(m.group(1)), int(m.group(2))
+          elif cursor:
+              print(f"::warning::Unrecognized cursor '{cursor}' — restarting from newest", file=sys.stderr)
+
+          # Already-archived ledger + CVEs the crawler has queued as spillover
+          schedule = json.load(open('/tmp/schedule.json'))
+          archived = {e['cve_id'] for e in schedule.get('entries', [])}
+          if os.path.exists('.state/spillover-cves.txt'):
+              archived |= {l.strip() for l in open('.state/spillover-cves.txt') if l.strip()}
+          print(f"Ledger: {len(archived)} CVEs already archived or queued", file=sys.stderr)
+          print(f"Cursor: {cursor or '(none — starting from newest)'}", file=sys.stderr)
+
+          list_calls = 0
+
+          def list_dir(path):
+              global list_calls
+              list_calls += 1
+              return gh_api(f'repos/CVEProject/cvelistV5/contents/{path}')
+
+          years = sorted(
+              (int(d['name']) for d in list_dir('cves')
+               if d.get('type') == 'dir' and d['name'].isdigit()),
+              reverse=True)
+
+          eligible = []       # CVEs to archive this run
+          fetches = 0         # network refs-checks performed
+          walked = 0          # total CVEs walked past (incl. ledger skips)
+          last_scanned = cursor if m else ''
+          exhausted = True    # becomes False if we stop before reaching MIN_YEAR
+
+          def before_cursor(year, num):
+              if cur_year is None:
+                  return True
+              return year < cur_year or (year == cur_year and num < cur_num)
+
+          try:
+              for year in years:
+                  if year < MIN_YEAR:
+                      continue
+                  if cur_year is not None and year > cur_year:
+                      continue
+
+                  buckets = list_dir(f'cves/{year}')
+                  bnames = sorted(
+                      (b['name'] for b in buckets
+                       if b.get('type') == 'dir' and re.match(r'^\d+xxx$', b['name'])),
+                      key=lambda n: int(n[:-3]), reverse=True)
+
+                  for bname in bnames:
+                      base = int(bname[:-3]) * 1000
+                      # Bucket holds [base, base+999]; skip if nothing in it is below the cursor
+                      if cur_year is not None and year == cur_year and base >= cur_num:
+                          continue
+                      if list_calls >= LIST_BUDGET:
+                          raise StopIteration
+
+                      files = list_dir(f'cves/{year}/{bname}')
+                      ids = []
+                      for f in files:
+                          m2 = re.match(r'^(CVE-\d{4}-(\d+))\.json$', f.get('name', ''))
+                          if m2:
+                              ids.append((int(m2.group(2)), m2.group(1)))
+                      ids.sort(reverse=True)
+
+                      for num, cve_id in ids:
+                          if not before_cursor(year, num):
+                              continue
+                          walked += 1
+                          last_scanned = cve_id
+
+                          if cve_id not in archived:
+                              fetches += 1
+                              block = num // 1000
+                              url = (f"https://raw.githubusercontent.com/CVEProject/cvelistV5/"
+                                     f"refs/heads/main/cves/{year}/{block}xxx/{cve_id}.json")
+                              r = subprocess.run(['curl', '-sf', url], capture_output=True, text=True)
+                              refs = []
+                              if r.returncode == 0:
+                                  try:
+                                      refs = [x.get('url') for x in
+                                              json.loads(r.stdout).get('containers', {})
+                                              .get('cna', {}).get('references', [])
+                                              if x.get('url')]
+                                  except (json.JSONDecodeError, AttributeError):
+                                      pass
+                              if refs:
+                                  eligible.append(cve_id)
+
+                          if len(eligible) >= MAX_CVES or fetches >= MAX_SCAN:
+                              raise StopIteration
+          except StopIteration:
+              exhausted = False
+
+          new_cursor = 'DONE' if exhausted else last_scanned
+          cursor_changed = (new_cursor != cursor) and bool(new_cursor)
+
+          if cursor_changed and not DRY_RUN:
+              os.makedirs('.state', exist_ok=True)
+              with open(CURSOR_FILE, 'w') as f:
+                  f.write(new_cursor + '\n')
+
+          cve_json = json.dumps(eligible)
+          print(f"Walked {walked} CVEs ({fetches} refs-checks, {list_calls} listings) — "
+                f"{len(eligible)} to archive, cursor → {new_cursor or '(unchanged)'}", file=sys.stderr)
+          write_outputs(len(eligible), cve_json, cursor_changed and not DRY_RUN)
+
+          with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as f:
+              f.write("### Backfill Scan Results\n\n")
+              f.write("| Metric | Value |\n|--------|-------|\n")
+              f.write(f"| CVEs walked | {walked} |\n")
+              f.write(f"| Refs-checks (network) | {fetches} |\n")
+              f.write(f"| CVEs to archive | {len(eligible)} (cap: {MAX_CVES}) |\n")
+              f.write(f"| Cursor | `{cursor or '(none)'}` → `{new_cursor or '(unchanged)'}` |\n")
+              f.write(f"| Dry run | {DRY_RUN} |\n")
+              if eligible:
+                  f.write("\n**CVEs to archive:**\n")
+                  for c in eligible:
+                      f.write(f"- {c}\n")
+          PYEOF
+
+      - name: Commit updated cursor
+        continue-on-error: true
+        if: inputs.dry_run != 'true' && steps.scan.outputs.cursor_changed == 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add .state/backfill-cursor
+          git commit -m "chore: update backfill cursor ($(cat .state/backfill-cursor))"
+          git pull --rebase origin "${GITHUB_REF_NAME}" || true
+          git push
+
+  archive:
+    name: Backfill ${{ matrix.cve_id }}
+    needs: scan
+    if: needs.scan.outputs.cves_found != '' && needs.scan.outputs.cves_found != '0' && inputs.dry_run != 'true'
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix:
+        cve_id: ${{ fromJSON(needs.scan.outputs.cve_list) }}
+    uses: ./.github/workflows/archive-cve.yml
+    with:
+      cve_id: ${{ matrix.cve_id }}
+    secrets: inherit
+
+  register:
+    name: Register backfilled CVEs in schedule
+    needs: [scan, archive]
+    if: always() && needs.scan.outputs.cves_found != '' && needs.scan.outputs.cves_found != '0' && inputs.dry_run != 'true'
+    runs-on: ubuntu-latest
+    env:
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      AWS_REGION: ${{ secrets.AWS_REGION || 'us-east-1' }}
+      S3_BUCKET: archiver-demo-v1-public
+    steps:
+      - name: Add backfilled CVEs to schedule ledger
+        run: |
+          set -euo pipefail
+
+          aws s3 cp "s3://${S3_BUCKET}/v2/schedule.json" /tmp/schedule.json 2>/dev/null \
+            || echo '{"entries":[]}' > /tmp/schedule.json
+
+          # Backfilled CVEs are historical — mark every re-archive interval as
+          # already completed so rearchive.yml doesn't re-snapshot old, stable
+          # content 4 more times. The entry still records them as archived.
+          python3 - <<'PYEOF'
+          import json, os
+          from datetime import datetime, timezone
+
+          now = datetime.now(timezone.utc)
+          cve_list = json.loads(os.environ.get('CVE_LIST', '[]'))
+          schedule = json.load(open('/tmp/schedule.json'))
+
+          existing = {e['cve_id'] for e in schedule.get('entries', [])}
+          added = 0
+
+          for cve_id in cve_list:
+              if cve_id in existing:
+                  continue
+              schedule.setdefault('entries', []).append({
+                  'cve_id': cve_id,
+                  'first_archived': now.strftime('%Y-%m-%dT%H:%M:%SZ'),
+                  'completed_intervals': [0, 3, 10, 30, 90],
+                  'last_rearchived': now.strftime('%Y%m%d-%H%M%S'),
+                  'source': 'backfill',
+              })
+              added += 1
+
+          schedule['entries'].sort(key=lambda e: e['cve_id'])
+          schedule['last_updated'] = now.strftime('%Y%m%d-%H%M%S')
+
+          json.dump(schedule, open('/tmp/schedule_updated.json', 'w'), indent=2)
+          print(f"Schedule: added {added} backfilled CVEs ({len(schedule['entries'])} total)")
+          PYEOF
+
+          aws s3 cp /tmp/schedule_updated.json "s3://${S3_BUCKET}/v2/schedule.json" \
+            --content-type application/json
+        env:
+          CVE_LIST: ${{ needs.scan.outputs.cve_list }}
