@@ -1,0 +1,1 @@
+{"domain":"reference1.example.com","url_count":1,"urls":[{"original_url":"https://reference1.example.com/x_program_center/jaxrs/invoke","path":"/x_program_center/jaxrs/invoke","query":"","snapshots":[{"timestamp":"20260817-231414","s3_prefix":"v2/reference1.example.com/x_program_center/jaxrs/invoke/20260817-231414","files":["output.pdf","screenshot.png","warc.tgz"]}]}]}
