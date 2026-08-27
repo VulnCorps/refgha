@@ -1,0 +1,1 @@
+{"domain":"u-boot.com","url_count":1,"urls":[{"original_url":"https://u-boot.com","path":"/","query":"","snapshots":[{"timestamp":"20260826-213319","s3_prefix":"v2/u-boot.com/20260826-213319","files":["output.pdf","screenshot.png","warc.tgz"]},{"timestamp":"20260826-213317","s3_prefix":"v2/u-boot.com/20260826-213317","files":["output.pdf","screenshot.png","warc.tgz"]}]}]}
