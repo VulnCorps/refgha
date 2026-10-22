@@ -1,8 +1,7 @@
 name: Generate Stats
 
+# Schedule disabled: migrating to cve-community/reference-archiver
 on:
-  schedule:
-    - cron: '0 2 * * *'  # Nightly at 02:00 UTC
   workflow_dispatch:
 
 permissions:

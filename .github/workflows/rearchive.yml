@@ -1,8 +1,7 @@
 name: Re-archive Scheduled References
 
+# Schedule disabled: migrating to cve-community/reference-archiver
 on:
-  schedule:
-    - cron: '15 * * * *'  # Every hour at :15
   workflow_dispatch:
     inputs:
       dry_run:

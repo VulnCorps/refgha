@@ -1,8 +1,7 @@
 name: Generate Site Data
 
+# Schedule disabled: migrating to cve-community/reference-archiver
 on:
-  schedule:
-    - cron: '30 * * * *'  # Every hour at :30 (offset from crawl at :00)
   workflow_dispatch:
 
 permissions:
